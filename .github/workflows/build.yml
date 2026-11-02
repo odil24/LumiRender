@@ -1,0 +1,192 @@
+name: Build LumiRender (Windows, CUDA sm_61, no OptiX)
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  PROJECT_SRC: ${{ github.workspace }}/LumiRender
+  ISPC_VERSION: "1.23.0"
+  CUDA_ARCH: "sm_61"
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # ---------- 1. vcpkg ----------
+    - name: Setup vcpkg
+      run: |
+        if (!(Test-Path "$env:VCPKG_ROOT")) {
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
+        }
+        echo "$env:VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Cache vcpkg installed
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.VCPKG_ROOT }}/installed
+          ${{ env.VCPKG_ROOT }}/buildtrees
+        key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build.yml') }}-v2
+
+    - name: Install vcpkg dependencies
+      run: |
+        vcpkg install assimp:x64-windows `
+                     embree3:x64-windows `
+                     openimageio:x64-windows `
+                     openimagedenoise:x64-windows
+
+    # ---------- 2. ISPC (официальный GitHub Release) ----------
+    - name: Install ISPC
+      run: |
+        $url = "https://github.com/ispc/ispc/releases/download/v$env:ISPC_VERSION/ispc-v$env:ISPC_VERSION-windows.zip"
+        Invoke-WebRequest -Uri $url -OutFile ispc.zip
+        Expand-Archive -Path ispc.zip -DestinationPath C:\ispc
+        $ispcExe = Get-ChildItem -Path C:\ispc -Recurse -Filter ispc.exe | Select-Object -First 1
+        if (-not $ispcExe) { throw "ispc.exe not found in archive" }
+        $ispcExe.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    # ---------- 3. CUDA Toolkit ----------
+    - name: Install CUDA Toolkit
+      uses: Jimver/cuda-toolkit@v0.2.16
+      with:
+        cuda: '12.4.0'
+        method: 'network'
+
+    # ---------- 4. MSVC env ----------
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+
+    # ================= CPU BUILD (без CUDA) =================
+    - name: Configure CMake (CPU)
+      run: |
+        cmake -S $env:PROJECT_SRC -B build-cpu `
+          -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+          -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON `
+          -DLUMINOUS_BUILD_TESTS=OFF
+
+    - name: Build (CPU)
+      run: cmake --build build-cpu --config $env:BUILD_TYPE --parallel
+
+    - name: Package CPU artefacts
+      run: |
+        New-Item -ItemType Directory -Force -Path out-cpu | Out-Null
+        $binDir = "build-cpu\$env:BUILD_TYPE\bin"
+        if (Test-Path $binDir) {
+          Copy-Item -Path "$binDir\*" -Destination out-cpu\ -Recurse -Force
+        } else {
+          Get-ChildItem -Path build-cpu -Include *.exe,*.dll -Recurse |
+            Where-Object { $_.FullName -notmatch 'CMakeFiles|check_cuda' } |
+            ForEach-Object { Copy-Item $_.FullName -Destination out-cpu\ -Force }
+        }
+        if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\bin") {
+          Copy-Item "$env:VCPKG_ROOT\installed\x64-windows\bin\*.dll" -Destination out-cpu\ -Force
+        }
+        Compress-Archive -Path out-cpu\* -DestinationPath LumiRender-CPU.zip -Force
+
+    # ================= GPU BUILD (CUDA sm_61, БЕЗ OptiX) =================
+    # Заглушка check_cuda.exe: сообщает CMake архитектуру sm_61 (GTX 1060)
+    - name: Pre-create check_cuda.exe (sm_61 stub)
+      run: |
+        New-Item -ItemType Directory -Force -Path build-gpu | Out-Null
+        @"
+        #include <stdio.h>
+        int main() { printf("sm_61"); return 0; }
+        "@ | Out-File -FilePath check_cuda_stub.c -Encoding ASCII
+        cl /nologo check_cuda_stub.c /Fe:build-gpu\check_cuda.exe
+        if (!(Test-Path build-gpu\check_cuda.exe)) { throw "Failed to create check_cuda.exe stub" }
+
+    - name: Configure CMake (GPU, CUDA, no OptiX)
+      run: |
+        cmake -S $env:PROJECT_SRC -B build-gpu `
+          -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+          -DLUMINOUS_BUILD_TESTS=OFF `
+          -DLUMINOUS_RENDER_ENABLE_OPTIX=OFF   # отключаем OptiX-бэкенд
+
+    - name: Build (GPU)
+      run: cmake --build build-gpu --config $env:BUILD_TYPE --parallel
+
+    - name: Package GPU artefacts
+      run: |
+        New-Item -ItemType Directory -Force -Path out-gpu | Out-Null
+        $binDir = "build-gpu\$env:BUILD_TYPE\bin"
+        if (Test-Path $binDir) {
+          Copy-Item -Path "$binDir\*" -Destination out-gpu\ -Recurse -Force
+        } else {
+          Get-ChildItem -Path build-gpu -Include *.exe,*.dll -Recurse |
+            Where-Object { $_.FullName -notmatch 'CMakeFiles|check_cuda' } |
+            ForEach-Object { Copy-Item $_.FullName -Destination out-gpu\ -Force }
+        }
+        if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\bin") {
+          Copy-Item "$env:VCPKG_ROOT\installed\x64-windows\bin\*.dll" -Destination out-gpu\ -Force
+        }
+        Compress-Archive -Path out-gpu\* -DestinationPath LumiRender-GPU.zip -Force
+
+    # ================= TEST RENDER =================
+    - name: Run test render
+      run: |
+        New-Item -ItemType Directory -Force -Path rendertest | Out-Null
+        $exe = Get-ChildItem -Path build-gpu -Filter *.exe -Recurse |
+               Where-Object { $_.FullName -notmatch 'check_cuda|CMakeFiles' } |
+               Select-Object -First 1
+        if (-not $exe) {
+          "No executable found" | Out-File rendertest\error.txt
+          Compress-Archive -Path rendertest\* -DestinationPath rendertest.zip -Force
+          return
+        }
+        Write-Host "Executable: $($exe.FullName)"
+        try {
+          & $exe.FullName --help 2>&1 | Out-File -FilePath rendertest\help.txt -Encoding utf8
+        } catch {
+          "Failed to run --help: $_" | Out-File rendertest\help.txt
+        }
+        foreach ($dir in @("$env:PROJECT_SRC\asset", "$env:PROJECT_SRC\assets")) {
+          if (Test-Path $dir) {
+            Copy-Item "$dir\*" -Destination rendertest\ -Recurse -Force -ErrorAction SilentlyContinue
+          }
+        }
+        $scene = Get-ChildItem -Path $env:PROJECT_SRC -Include *.scene,*.json -Recurse -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+        if ($scene) {
+          Write-Host "Attempting render of $($scene.FullName)"
+          try {
+            & $exe.FullName $scene.FullName -o rendertest\test.exr 2>&1 |
+              Out-File -FilePath rendertest\render.log -Encoding utf8
+          } catch {
+            "Render attempt failed: $_" | Out-File rendertest\render.log -Append
+          }
+        }
+        if (-not (Get-ChildItem rendertest)) {
+          "No render output" | Out-File rendertest\placeholder.txt
+        }
+        Compress-Archive -Path rendertest\* -DestinationPath rendertest.zip -Force
+
+    # ================= ARTIFACTS =================
+    - name: Upload CPU artefacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: LumiRender-CPU
+        path: LumiRender-CPU.zip
+
+    - name: Upload GPU artefacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: LumiRender-GPU
+        path: LumiRender-GPU.zip
+
+    - name: Upload rendertest
+      uses: actions/upload-artifact@v4
+      with:
+        name: rendertest
+        path: rendertest.zip
