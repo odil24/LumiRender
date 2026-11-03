@@ -35,14 +35,12 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          ${{ env.VCPKG_ROOT }}/installed
-          ${{ env.VCPKG_ROOT }}/buildtrees
-        # Кэш привязан к версии, чтобы изменения в других шагах не сбрасывали 2-часовую компиляцию
+          ${{ env:VCPKG_ROOT }}/installed
+          ${{ env:VCPKG_ROOT }}/buildtrees
         key: ${{ runner.os }}-vcpkg-deps-v5
 
     - name: Install vcpkg dependencies
       run: |
-        # openimagedenoise удален, так как скачивается отдельно
         vcpkg install assimp:x64-windows `
                      embree:x64-windows `
                      openimageio:x64-windows
@@ -90,7 +88,8 @@ jobs:
     - name: Configure CMake (CPU)
       run: |
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
-        cmake -S $env:PROJECT_SRC -B build-cpu `
+        # Добавлен флаг -G "Ninja" для поддержки компиляции ISPC
+        cmake -G "Ninja" -S $env:PROJECT_SRC -B build-cpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
           -DCMAKE_PREFIX_PATH="$oidnRoot" `
@@ -103,7 +102,7 @@ jobs:
     - name: Package CPU artefacts
       run: |
         New-Item -ItemType Directory -Force -Path out-cpu | Out-Null
-        $binDir = "build-cpu\$env:BUILD_TYPE\bin"
+        $binDir = "build-cpu\bin"
         if (Test-Path $binDir) {
           Copy-Item -Path "$binDir\*" -Destination out-cpu\ -Recurse -Force
         } else {
@@ -121,7 +120,7 @@ jobs:
         }
         Compress-Archive -Path out-cpu\* -DestinationPath LumiRender-CPU.zip -Force
 
-    # ================= GPU BUILD (CUDA sm_61, БЕЗ OptiX) =================
+    # ================= GPU BUILD =================
     - name: Pre-create check_cuda.exe (sm_61 stub)
       run: |
         New-Item -ItemType Directory -Force -Path build-gpu | Out-Null
@@ -135,7 +134,8 @@ jobs:
     - name: Configure CMake (GPU, CUDA, no OptiX)
       run: |
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
-        cmake -S $env:PROJECT_SRC -B build-gpu `
+        # Добавлен флаг -G "Ninja"
+        cmake -G "Ninja" -S $env:PROJECT_SRC -B build-gpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
           -DCMAKE_PREFIX_PATH="$oidnRoot" `
@@ -148,7 +148,7 @@ jobs:
     - name: Package GPU artefacts
       run: |
         New-Item -ItemType Directory -Force -Path out-gpu | Out-Null
-        $binDir = "build-gpu\$env:BUILD_TYPE\bin"
+        $binDir = "build-gpu\bin"
         if (Test-Path $binDir) {
           Copy-Item -Path "$binDir\*" -Destination out-gpu\ -Recurse -Force
         } else {
