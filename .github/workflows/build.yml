@@ -37,7 +37,6 @@ jobs:
         path: |
           ${{ env.VCPKG_ROOT }}/installed
           ${{ env.VCPKG_ROOT }}/buildtrees
-        # Исправлен синтаксис: env.VCPKG_ROOT вместо env:VCPKG_ROOT
         key: ${{ runner.os }}-vcpkg-deps-v6
 
     - name: Install vcpkg dependencies
@@ -88,10 +87,11 @@ jobs:
     - name: Configure CMake (CPU)
       run: |
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
+        # Ключевое исправление: добавляем vcpkg в CMAKE_PREFIX_PATH вместе с OIDN
         cmake -G "Ninja" -S $env:PROJECT_SRC -B build-cpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-          -DCMAKE_PREFIX_PATH="$oidnRoot" `
+          -DCMAKE_PREFIX_PATH="$oidnRoot;$env:VCPKG_ROOT/installed/x64-windows" `
           -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON `
           -DLUMINOUS_BUILD_TESTS=OFF
 
@@ -101,7 +101,6 @@ jobs:
     - name: Package CPU artefacts
       run: |
         New-Item -ItemType Directory -Force -Path out-cpu | Out-Null
-        # Ищем бинарники рекурсивно, чтобы не зависеть от путей Ninja
         Get-ChildItem -Path build-cpu -Include *.exe,*.dll -Recurse |
           Where-Object { $_.FullName -notmatch 'CMakeFiles|check_cuda' } |
           ForEach-Object { Copy-Item $_.FullName -Destination out-cpu\ -Force }
@@ -131,10 +130,11 @@ jobs:
     - name: Configure CMake (GPU, CUDA, no OptiX)
       run: |
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
+        # Ключевое исправление: добавляем vcpkg в CMAKE_PREFIX_PATH вместе с OIDN
         cmake -G "Ninja" -S $env:PROJECT_SRC -B build-gpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-          -DCMAKE_PREFIX_PATH="$oidnRoot" `
+          -DCMAKE_PREFIX_PATH="$oidnRoot;$env:VCPKG_ROOT/installed/x64-windows" `
           -DLUMINOUS_BUILD_TESTS=OFF `
           -DLUMINOUS_RENDER_ENABLE_OPTIX=OFF
 
