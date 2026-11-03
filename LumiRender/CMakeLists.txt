@@ -4,6 +4,8 @@ project(LumiRender LANGUAGES C CXX ISPC VERSION 1.0.0)
 
 # Option for building test targets
 option(LUMINOUS_BUILD_TESTS "Build tests" FALSE)
+# Option to enable OptiX backend (disabled by default in our CI workflow)
+option(LUMINOUS_RENDER_ENABLE_OPTIX "Enable OptiX for GPU rendering" ON)
 
 set(CMAKE_ISPC_INSTRUCTION_SETS "avx2-i32x8;avx1-i32x8;sse4-i32x4;sse2-i32x4")
 
@@ -38,19 +40,12 @@ endif(WIN32 AND ${LUMINOUS_ENABLE_VLD})
 
 set(STDCXX_EXTRA_LIBS "")
 
-# include(CheckCXXSymbolExists)
-# check_cxx_symbol_exists(std::filesystem::path::preferred_separator filesystem cxx17fs)
-# if(NOT cxx17fs)
-#     message("std::filesystem will be replaced by std::experimental::filesystem in gcc")
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     # require at least gcc 7.1
     if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.1)
-        # add_link_options("-lstdc++fs" "-lpthread")
         list(APPEND STDCXX_EXTRA_LIBS "stdc++fs" "pthread")
     endif()
-# endif(NOT cxx17fs)
 endif()
-
 
 # 项目信息
 set(APP_NAME LumiRender CACHE STRING INTERNAL)
@@ -59,12 +54,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 
 find_package(CUDAToolkit)
 if (CUDAToolkit_FOUND)
-    include(configure_optix)
+    if (LUMINOUS_RENDER_ENABLE_OPTIX)
+        include(configure_optix)
+    endif()
     include(CheckLanguage)
     set(LUMINOUS_RENDER_ENABLE_CUDA_DEFAULT ON)
 else ()
     set(LUMINOUS_RENDER_ENABLE_CUDA_DEFAULT OFF)
-    message(not find cuda !!)
+    message(STATUS "Not find CUDA !!")
 endif ()
 
 set(CMAKE_CXX_STANDARD 11)
@@ -90,19 +87,13 @@ set(LUMINOUS_CPU_BACKEND ON)
 set(LUMINOUS_LOCAL_EMBREE ON)
 
 if (LUMINOUS_LOCAL_EMBREE)
-    find_package(embree 3 CONFIG REQUIRED)
+    # Убрана жесткая привязка к версии 3, чтобы vcpkg мог отдать актуальную версию (4.x)
+    find_package(embree CONFIG REQUIRED)
 else()
-#    add_subdirectory(thirdparty/embree)
-#    add_library(embree_config INTERFACE)
-#    target_link_libraries(embree_config INTERFACE embree3)
-#    set_target_properties(embree PROPERTIES
-#            PUBLIC_HEADER "${HEADER_FILES}"
-#            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>/bin/"
-#            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>/bin/"
-#            WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # add_subdirectory(thirdparty/embree)
 endif()
 
-# Disable OpenImageIO for Unix like build(for imcompatible boost version conflicts)
+# Disable OpenImageIO for Unix like build (for incompatible boost version conflicts)
 if(NOT UNIX)
     find_package(OpenImageIO CONFIG REQUIRED)
 endif()
@@ -179,8 +170,8 @@ if(WIN32)
   set(LUMINOUS_RUNTIME_DEPS_EXCLUDES_POSTFIX ".*system32/.*\\.dll" "cuda")
 else()
   set(LUMINOUS_RUNTIME_DEPS_EXCLUDES_PREFIX "")
-  set(LUMINOUS_RUNTIME_DEPS_EXCLUDES_POSTFIX "librt.*" "libdl.*" "libX11.*" "libpthread.*" "libm.*" "libgcc_s.*" "libc\..*"
-    "libxcb.*" "libXau.*" "libXdmcp.*" "libz.*" "ld-.*" "libcuda\..*")
+  set(LUMINOUS_RUNTIME_DEPS_EXCLUDES_POSTFIX "librt.*" "libdl.*" "libX11.*" "libpthread.*" "libm.*" "libgcc_s.*" "libc\\..*"
+    "libxcb.*" "libXau.*" "libXdmcp.*" "libz.*" "ld-.*" "libcuda\\..*")
 endif()
 
 install(RUNTIME_DEPENDENCY_SET LUMINOUS_RUNTIME_DEPS
@@ -191,39 +182,5 @@ install(RUNTIME_DEPENDENCY_SET LUMINOUS_RUNTIME_DEPS
     RUNTIME DESTINATION bin
 )
 
-# install(CODE "set(DEPENDENCY_PATHS \"${DEPENDENCY_PATHS}\")")
-# install(
-#   CODE [[
-#     file(GET_RUNTIME_DEPENDENCIES
-#       EXECUTABLES $<TARGET_FILE:luminous>
-#       RESOLVED_DEPENDENCIES_VAR _r_deps
-#       UNRESOLVED_DEPENDENCIES_VAR _u_deps
-#       DIRECTORIES ${DEPENDENCY_PATHS}
-#       PRE_EXCLUDE_REGEXES  "api-ms-" "ext-ms-"
-#       POST_EXCLUDE_REGEXES  ".*system32/.*\\.dll"
-#     )
-#     foreach(_file ${_r_deps})
-#         file(INSTALL
-#           DESTINATION "${CMAKE_INSTALL_PREFIX}/bin"
-#           TYPE SHARED_LIBRARY
-#           FOLLOW_SYMLINK_CHAIN
-#           FILES "${_file}"
-#         )
-#     endforeach()
-#     list(LENGTH _u_deps _u_length)
-#     if("${_u_length}" GREATER 0)
-#       message(WARNING "Unresolved dependencies detected!")
-#       foreach(_file ${_u_deps})
-#         message(WARNING "Unresolved dependency: \"${_file}\"")
-#       endforeach()
-#     endif()
-#   ]])
-
 # Auto package
 include(CPack)
-
-
-
-
-
-
