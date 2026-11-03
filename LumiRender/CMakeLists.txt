@@ -12,16 +12,9 @@ set(CMAKE_ISPC_INSTRUCTION_SETS "avx2-i32x8;avx1-i32x8;sse4-i32x4;sse2-i32x4")
 if(UNIX)
   add_compile_options("$<$<COMPILE_LANGUAGE:C>:-fPIC>")
   add_compile_options("$<$<COMPILE_LANGUAGE:ISPC>:--arch=x86-64>")
-  # don't skip the full RPATH for the build tree
   set(CMAKE_SKIP_BUILD_RPATH FALSE)
-  # when building, don't use the install RPATH already available
   set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-
-  # the RPATH to be used when installing
   set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
-
-  # don't add the automatically determined parts of the RPATH
-  # which point to directories outside the build tree to the install RPATH
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
 endif()
 
@@ -41,7 +34,6 @@ endif(WIN32 AND ${LUMINOUS_ENABLE_VLD})
 set(STDCXX_EXTRA_LIBS "")
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    # require at least gcc 7.1
     if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.1)
         list(APPEND STDCXX_EXTRA_LIBS "stdc++fs" "pthread")
     endif()
@@ -87,13 +79,13 @@ set(LUMINOUS_CPU_BACKEND ON)
 set(LUMINOUS_LOCAL_EMBREE ON)
 
 if (LUMINOUS_LOCAL_EMBREE)
-    # Убрана жесткая привязка к версии 3, чтобы vcpkg мог отдать актуальную версию (4.x)
+    # Убрана жесткая привязка к версии 3, чтобы vcpkg мог отдать актуальную версию
     find_package(embree CONFIG REQUIRED)
 else()
-    # add_subdirectory(thirdparty/embree)
+#    add_subdirectory(thirdparty/embree)
 endif()
 
-# Disable OpenImageIO for Unix like build (for incompatible boost version conflicts)
+# Disable OpenImageIO for Unix like build(for imcompatible boost version conflicts)
 if(NOT UNIX)
     find_package(OpenImageIO CONFIG REQUIRED)
 endif()
