@@ -37,28 +37,30 @@ jobs:
         path: |
           ${{ env.VCPKG_ROOT }}/installed
           ${{ env.VCPKG_ROOT }}/buildtrees
-        key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build.yml') }}-v4
+        # Кэш привязан к версии, чтобы изменения в других шагах не сбрасывали 2-часовую компиляцию
+        key: ${{ runner.os }}-vcpkg-deps-v5
 
     - name: Install vcpkg dependencies
       run: |
-        # openimagedenoise удален, так как мы скачаем его отдельно
+        # openimagedenoise удален, так как скачивается отдельно
         vcpkg install assimp:x64-windows `
                      embree:x64-windows `
                      openimageio:x64-windows
 
-    # ---------- 2. OpenImageDenoise (официальный релиз v2.5.1) ----------
+    # ---------- 2. OpenImageDenoise (v2.5.1) ----------
     - name: Download and Setup OpenImageDenoise
+      shell: pwsh
       run: |
-        $oidnUrl = "https://github.com/OpenImageDenoise/oidn/releases/download/v$env:OIDN_VERSION/oidn-$env:OIDN_VERSION.x64.vc14.windows.zip"
+        $oidnUrl = "https://github.com/RenderKit/oidn/releases/download/v$env:OIDN_VERSION/oidn-$env:OIDN_VERSION.x64.windows.zip"
         Write-Host "Downloading OIDN from: $oidnUrl"
         Invoke-WebRequest -Uri $oidnUrl -OutFile oidn.zip
         Expand-Archive -Path oidn.zip -DestinationPath C:\oidn
-        # Проверяем, что архив распаковался (структура: oidn-2.5.1.x64.vc14.windows)
-        $oidnDir = Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1
-        if (-not $oidnDir) { throw "Failed to extract OIDN" }
-        Write-Host "OIDN extracted to: $($oidnDir.FullName)"
-        # Добавляем в PATH для удобства (хотя CMake найдёт по CMAKE_PREFIX_PATH)
-        $oidnBin = Join-Path $oidnDir.FullName "bin"
+        
+        $oidnRoot = Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1
+        if (-not $oidnRoot) { throw "Failed to extract OIDN" }
+        Write-Host "OIDN extracted to: $($oidnRoot.FullName)"
+        
+        $oidnBin = Join-Path $oidnRoot.FullName "bin"
         if (Test-Path $oidnBin) {
           $oidnBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         }
@@ -87,7 +89,6 @@ jobs:
     # ================= CPU BUILD =================
     - name: Configure CMake (CPU)
       run: |
-        # Находим папку OIDN для передачи в CMake
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
         cmake -S $env:PROJECT_SRC -B build-cpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
@@ -110,11 +111,9 @@ jobs:
             Where-Object { $_.FullName -notmatch 'CMakeFiles|check_cuda' } |
             ForEach-Object { Copy-Item $_.FullName -Destination out-cpu\ -Force }
         }
-        # Копируем DLL из vcpkg
         if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\bin") {
           Copy-Item "$env:VCPKG_ROOT\installed\x64-windows\bin\*.dll" -Destination out-cpu\ -Force
         }
-        # Копируем DLL из OIDN (OpenImageDenoise.dll и возможные зависимости)
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
         $oidnBin = Join-Path $oidnRoot "bin"
         if (Test-Path $oidnBin) {
@@ -160,7 +159,6 @@ jobs:
         if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\bin") {
           Copy-Item "$env:VCPKG_ROOT\installed\x64-windows\bin\*.dll" -Destination out-gpu\ -Force
         }
-        # Копируем DLL из OIDN
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
         $oidnBin = Join-Path $oidnRoot "bin"
         if (Test-Path $oidnBin) {
