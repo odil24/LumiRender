@@ -36,16 +36,17 @@ jobs:
         path: |
           ${{ env.VCPKG_ROOT }}/installed
           ${{ env.VCPKG_ROOT }}/buildtrees
-        key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build.yml') }}-v2
+        # Обновили версию кэша на v3, чтобы сбросить старые ошибки embree3
+        key: ${{ runner.os }}-vcpkg-${{ hashFiles('.github/workflows/build.yml') }}-v3
 
     - name: Install vcpkg dependencies
       run: |
         vcpkg install assimp:x64-windows `
-                     embree3:x64-windows `
+                     embree:x64-windows `
                      openimageio:x64-windows `
                      openimagedenoise:x64-windows
 
-    # ---------- 2. ISPC (официальный GitHub Release) ----------
+    # ---------- 2. ISPC ----------
     - name: Install ISPC
       run: |
         $url = "https://github.com/ispc/ispc/releases/download/v$env:ISPC_VERSION/ispc-v$env:ISPC_VERSION-windows.zip"
@@ -66,7 +67,7 @@ jobs:
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
 
-    # ================= CPU BUILD (без CUDA) =================
+    # ================= CPU BUILD =================
     - name: Configure CMake (CPU)
       run: |
         cmake -S $env:PROJECT_SRC -B build-cpu `
@@ -95,7 +96,6 @@ jobs:
         Compress-Archive -Path out-cpu\* -DestinationPath LumiRender-CPU.zip -Force
 
     # ================= GPU BUILD (CUDA sm_61, БЕЗ OptiX) =================
-    # Заглушка check_cuda.exe: сообщает CMake архитектуру sm_61 (GTX 1060)
     - name: Pre-create check_cuda.exe (sm_61 stub)
       run: |
         New-Item -ItemType Directory -Force -Path build-gpu | Out-Null
@@ -112,7 +112,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
           -DLUMINOUS_BUILD_TESTS=OFF `
-          -DLUMINOUS_RENDER_ENABLE_OPTIX=OFF   # отключаем OptiX-бэкенд
+          -DLUMINOUS_RENDER_ENABLE_OPTIX=OFF
 
     - name: Build (GPU)
       run: cmake --build build-gpu --config $env:BUILD_TYPE --parallel
