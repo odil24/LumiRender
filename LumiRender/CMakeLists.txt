@@ -79,7 +79,7 @@ set(LUMINOUS_CPU_BACKEND ON)
 set(LUMINOUS_LOCAL_EMBREE ON)
 
 if (LUMINOUS_LOCAL_EMBREE)
-    # Убрана жесткая привязка к версии 3, чтобы vcpkg мог отдать актуальную версию
+    # Убрана жесткая привязка к версии 3
     find_package(embree CONFIG REQUIRED)
 else()
 #    add_subdirectory(thirdparty/embree)
