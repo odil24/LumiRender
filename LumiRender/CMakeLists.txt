@@ -12,9 +12,16 @@ set(CMAKE_ISPC_INSTRUCTION_SETS "avx2-i32x8;avx1-i32x8;sse4-i32x4;sse2-i32x4")
 if(UNIX)
   add_compile_options("$<$<COMPILE_LANGUAGE:C>:-fPIC>")
   add_compile_options("$<$<COMPILE_LANGUAGE:ISPC>:--arch=x86-64>")
+  # don't skip the full RPATH for the build tree
   set(CMAKE_SKIP_BUILD_RPATH FALSE)
+  # when building, don't use the install RPATH already available
   set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+
+  # the RPATH to be used when installing
   set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
+
+  # don't add the automatically determined parts of the RPATH
+  # which point to directories outside the build tree to the install RPATH
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
 endif()
 
@@ -34,6 +41,7 @@ endif(WIN32 AND ${LUMINOUS_ENABLE_VLD})
 set(STDCXX_EXTRA_LIBS "")
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    # require at least gcc 7.1
     if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.1)
         list(APPEND STDCXX_EXTRA_LIBS "stdc++fs" "pthread")
     endif()
@@ -66,7 +74,8 @@ function(luminous_render_add_application name)
     set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>/bin/")
 endfunction()
 
-find_package(assimp CONFIG REQUIRED)
+# ИСПРАВЛЕНО: Assimp с заглавной буквы для поиска AssimpConfig.cmake
+find_package(Assimp CONFIG REQUIRED)
 add_library(assimp_config INTERFACE)
 target_link_libraries(assimp_config INTERFACE assimp::assimp)
 
