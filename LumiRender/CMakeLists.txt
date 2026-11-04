@@ -74,8 +74,8 @@ function(luminous_render_add_application name)
     set_target_properties(${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>/bin/")
 endfunction()
 
-# ИСПРАВЛЕНО: Assimp с заглавной буквы для поиска AssimpConfig.cmake
-find_package(Assimp CONFIG REQUIRED)
+# ИСПРАВЛЕНО: используем имя пакета в нижнем регистре (assimp) вместо Assimp
+find_package(assimp CONFIG REQUIRED)
 add_library(assimp_config INTERFACE)
 target_link_libraries(assimp_config INTERFACE assimp::assimp)
 
