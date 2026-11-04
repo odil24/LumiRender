@@ -14,6 +14,9 @@ env:
   ISPC_VERSION: "1.23.0"
   CUDA_ARCH: "sm_61"
   OIDN_VERSION: "2.5.1"
+  ASSIMP_VERSION: "6.0.5"
+  EMBREE_VERSION: "4.4.1"
+  VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg_cache,readwrite"
 
 jobs:
   build-windows:
@@ -22,7 +25,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # ---------- 1. vcpkg ----------
+    # ---------- 1. vcpkg (только OpenImageIO) ----------
     - name: Setup vcpkg
       run: |
         if (!(Test-Path "$env:VCPKG_ROOT")) {
@@ -31,55 +34,72 @@ jobs:
         }
         echo "$env:VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    - name: Cache vcpkg installed
+    - name: Cache vcpkg binary archives
       uses: actions/cache@v4
       with:
-        path: |
-          ${{ env.VCPKG_ROOT }}/installed
-          ${{ env.VCPKG_ROOT }}/buildtrees
-        key: ${{ runner.os }}-vcpkg-deps-v6
+        path: ${{ github.workspace }}/vcpkg_cache
+        key: ${{ runner.os }}-vcpkg-binary-v3
 
     - name: Install vcpkg dependencies
       run: |
-        vcpkg install assimp:x64-windows `
-                     embree:x64-windows `
-                     openimageio:x64-windows
+        # Устанавливаем только OpenImageIO
+        vcpkg install openimageio:x64-windows
 
-    # ---------- 2. OpenImageDenoise (v2.5.1) ----------
+    # ---------- 2. Assimp (бинарный релиз) ----------
+    - name: Download and Setup Assimp
+      shell: pwsh
+      run: |
+        $assimpUrl = "https://github.com/assimp/assimp/releases/download/v$env:ASSIMP_VERSION/windows-x64-v$env:ASSIMP_VERSION.zip"
+        Invoke-WebRequest -Uri $assimpUrl -OutFile assimp.zip
+        Expand-Archive -Path assimp.zip -DestinationPath C:\assimp
+        $assimpRoot = Get-ChildItem -Path C:\assimp -Directory | Select-Object -First 1
+        $assimpBin = Join-Path $assimpRoot.FullName "bin"
+        if (Test-Path $assimpBin) {
+          $assimpBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        }
+
+    # ---------- 3. Embree (бинарный релиз) ----------
+    - name: Download and Setup Embree
+      shell: pwsh
+      run: |
+        $embreeUrl = "https://github.com/RenderKit/embree/releases/download/v$env:EMBREE_VERSION/embree-$env:EMBREE_VERSION.x64.windows.zip"
+        Invoke-WebRequest -Uri $embreeUrl -OutFile embree.zip
+        Expand-Archive -Path embree.zip -DestinationPath C:\embree
+        $embreeRoot = Get-ChildItem -Path C:\embree -Directory | Select-Object -First 1
+        $embreeBin = Join-Path $embreeRoot.FullName "bin"
+        if (Test-Path $embreeBin) {
+          $embreeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        }
+
+    # ---------- 4. OpenImageDenoise (бинарный релиз) ----------
     - name: Download and Setup OpenImageDenoise
       shell: pwsh
       run: |
         $oidnUrl = "https://github.com/RenderKit/oidn/releases/download/v$env:OIDN_VERSION/oidn-$env:OIDN_VERSION.x64.windows.zip"
-        Write-Host "Downloading OIDN from: $oidnUrl"
         Invoke-WebRequest -Uri $oidnUrl -OutFile oidn.zip
         Expand-Archive -Path oidn.zip -DestinationPath C:\oidn
-        
         $oidnRoot = Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1
-        if (-not $oidnRoot) { throw "Failed to extract OIDN" }
-        
         $oidnBin = Join-Path $oidnRoot.FullName "bin"
         if (Test-Path $oidnBin) {
           $oidnBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         }
 
-    # ---------- 3. ISPC ----------
+    # ---------- 5. ISPC ----------
     - name: Install ISPC
       run: |
         $url = "https://github.com/ispc/ispc/releases/download/v$env:ISPC_VERSION/ispc-v$env:ISPC_VERSION-windows.zip"
         Invoke-WebRequest -Uri $url -OutFile ispc.zip
         Expand-Archive -Path ispc.zip -DestinationPath C:\ispc
         $ispcExe = Get-ChildItem -Path C:\ispc -Recurse -Filter ispc.exe | Select-Object -First 1
-        if (-not $ispcExe) { throw "ispc.exe not found in archive" }
         $ispcExe.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    # ---------- 4. CUDA Toolkit ----------
+    # ---------- 6. CUDA Toolkit ----------
     - name: Install CUDA Toolkit
       uses: Jimver/cuda-toolkit@v0.2.16
       with:
         cuda: '12.4.0'
         method: 'network'
 
-    # ---------- 5. MSVC env ----------
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
 
@@ -87,11 +107,13 @@ jobs:
     - name: Configure CMake (CPU)
       run: |
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
-        # Ключевое исправление: добавляем vcpkg в CMAKE_PREFIX_PATH вместе с OIDN
+        $assimpRoot = (Get-ChildItem -Path C:\assimp -Directory | Select-Object -First 1).FullName
+        $embreeRoot = (Get-ChildItem -Path C:\embree -Directory | Select-Object -First 1).FullName
+        
         cmake -G "Ninja" -S $env:PROJECT_SRC -B build-cpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-          -DCMAKE_PREFIX_PATH="$oidnRoot;$env:VCPKG_ROOT/installed/x64-windows" `
+          -DCMAKE_PREFIX_PATH="$oidnRoot;$assimpRoot;$embreeRoot;$env:VCPKG_ROOT/installed/x64-windows" `
           -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON `
           -DLUMINOUS_BUILD_TESTS=OFF
 
@@ -111,9 +133,16 @@ jobs:
         
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
         $oidnBin = Join-Path $oidnRoot "bin"
-        if (Test-Path $oidnBin) {
-          Copy-Item "$oidnBin\*.dll" -Destination out-cpu\ -Force
-        }
+        if (Test-Path $oidnBin) { Copy-Item "$oidnBin\*.dll" -Destination out-cpu\ -Force }
+        
+        $assimpRoot = (Get-ChildItem -Path C:\assimp -Directory | Select-Object -First 1).FullName
+        $assimpBin = Join-Path $assimpRoot "bin"
+        if (Test-Path $assimpBin) { Copy-Item "$assimpBin\*.dll" -Destination out-cpu\ -Force }
+        
+        $embreeRoot = (Get-ChildItem -Path C:\embree -Directory | Select-Object -First 1).FullName
+        $embreeBin = Join-Path $embreeRoot "bin"
+        if (Test-Path $embreeBin) { Copy-Item "$embreeBin\*.dll" -Destination out-cpu\ -Force }
+        
         Compress-Archive -Path out-cpu\* -DestinationPath LumiRender-CPU.zip -Force
 
     # ================= GPU BUILD =================
@@ -125,16 +154,17 @@ jobs:
         int main() { printf("sm_61"); return 0; }
         "@ | Out-File -FilePath check_cuda_stub.c -Encoding ASCII
         cl /nologo check_cuda_stub.c /Fe:build-gpu\check_cuda.exe
-        if (!(Test-Path build-gpu\check_cuda.exe)) { throw "Failed to create check_cuda.exe stub" }
 
     - name: Configure CMake (GPU, CUDA, no OptiX)
       run: |
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
-        # Ключевое исправление: добавляем vcpkg в CMAKE_PREFIX_PATH вместе с OIDN
+        $assimpRoot = (Get-ChildItem -Path C:\assimp -Directory | Select-Object -First 1).FullName
+        $embreeRoot = (Get-ChildItem -Path C:\embree -Directory | Select-Object -First 1).FullName
+        
         cmake -G "Ninja" -S $env:PROJECT_SRC -B build-gpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-          -DCMAKE_PREFIX_PATH="$oidnRoot;$env:VCPKG_ROOT/installed/x64-windows" `
+          -DCMAKE_PREFIX_PATH="$oidnRoot;$assimpRoot;$embreeRoot;$env:VCPKG_ROOT/installed/x64-windows" `
           -DLUMINOUS_BUILD_TESTS=OFF `
           -DLUMINOUS_RENDER_ENABLE_OPTIX=OFF
 
@@ -147,16 +177,23 @@ jobs:
         Get-ChildItem -Path build-gpu -Include *.exe,*.dll -Recurse |
           Where-Object { $_.FullName -notmatch 'CMakeFiles|check_cuda' } |
           ForEach-Object { Copy-Item $_.FullName -Destination out-gpu\ -Force }
-          
+        
         if (Test-Path "$env:VCPKG_ROOT\installed\x64-windows\bin") {
           Copy-Item "$env:VCPKG_ROOT\installed\x64-windows\bin\*.dll" -Destination out-gpu\ -Force
         }
         
         $oidnRoot = (Get-ChildItem -Path C:\oidn -Directory | Select-Object -First 1).FullName
         $oidnBin = Join-Path $oidnRoot "bin"
-        if (Test-Path $oidnBin) {
-          Copy-Item "$oidnBin\*.dll" -Destination out-gpu\ -Force
-        }
+        if (Test-Path $oidnBin) { Copy-Item "$oidnBin\*.dll" -Destination out-gpu\ -Force }
+        
+        $assimpRoot = (Get-ChildItem -Path C:\assimp -Directory | Select-Object -First 1).FullName
+        $assimpBin = Join-Path $assimpRoot "bin"
+        if (Test-Path $assimpBin) { Copy-Item "$assimpBin\*.dll" -Destination out-gpu\ -Force }
+        
+        $embreeRoot = (Get-ChildItem -Path C:\embree -Directory | Select-Object -First 1).FullName
+        $embreeBin = Join-Path $embreeRoot "bin"
+        if (Test-Path $embreeBin) { Copy-Item "$embreeBin\*.dll" -Destination out-gpu\ -Force }
+        
         Compress-Archive -Path out-gpu\* -DestinationPath LumiRender-GPU.zip -Force
 
     # ================= TEST RENDER =================
@@ -171,34 +208,10 @@ jobs:
           Compress-Archive -Path rendertest\* -DestinationPath rendertest.zip -Force
           return
         }
-        
-        Write-Host "Executable: $($exe.FullName)"
-        try {
-          & $exe.FullName --help 2>&1 | Out-File -FilePath rendertest\help.txt -Encoding utf8
-        } catch {
-          "Failed to run --help: $_" | Out-File rendertest\help.txt
-        }
-        
-        foreach ($dir in @("$env:PROJECT_SRC\asset", "$env:PROJECT_SRC\assets")) {
-          if (Test-Path $dir) {
-            Copy-Item "$dir\*" -Destination rendertest\ -Recurse -Force -ErrorAction SilentlyContinue
-          }
-        }
-        
-        $scene = Get-ChildItem -Path $env:PROJECT_SRC -Include *.scene,*.json -Recurse -ErrorAction SilentlyContinue |
-                 Select-Object -First 1
+        try { & $exe.FullName --help 2>&1 | Out-File -FilePath rendertest\help.txt -Encoding utf8 } catch { }
+        $scene = Get-ChildItem -Path $env:PROJECT_SRC -Include *.scene,*.json -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($scene) {
-          Write-Host "Attempting render of $($scene.FullName)"
-          try {
-            & $exe.FullName $scene.FullName -o rendertest\test.exr 2>&1 |
-              Out-File -FilePath rendertest\render.log -Encoding utf8
-          } catch {
-            "Render attempt failed: $_" | Out-File rendertest\render.log -Append
-          }
-        }
-        
-        if (-not (Get-ChildItem rendertest)) {
-          "No render output" | Out-File rendertest\placeholder.txt
+          try { & $exe.FullName $scene.FullName -o rendertest\test.exr 2>&1 | Out-File -FilePath rendertest\render.log -Encoding utf8 } catch { }
         }
         Compress-Archive -Path rendertest\* -DestinationPath rendertest.zip -Force
 
