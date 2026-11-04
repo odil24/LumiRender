@@ -96,6 +96,7 @@ jobs:
         
         cmake -G "Ninja" -S $env:PROJECT_SRC -B build-cpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -DVCPKG_TARGET_TRIPLET=x64-windows `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
           -DCMAKE_PREFIX_PATH="$oidnRoot;$embreeRoot;$env:VCPKG_ROOT/installed/x64-windows" `
           -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON `
@@ -142,6 +143,7 @@ jobs:
         
         cmake -G "Ninja" -S $env:PROJECT_SRC -B build-gpu `
           -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+          -DVCPKG_TARGET_TRIPLET=x64-windows `
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
           -DCMAKE_PREFIX_PATH="$oidnRoot;$embreeRoot;$env:VCPKG_ROOT/installed/x64-windows" `
           -DLUMINOUS_BUILD_TESTS=OFF `
@@ -189,25 +191,6 @@ jobs:
           try { & $exe.FullName $scene.FullName -o rendertest\test.exr 2>&1 | Out-File -FilePath rendertest\render.log -Encoding utf8 } catch { }
         }
         Compress-Archive -Path rendertest\* -DestinationPath rendertest.zip -Force
-
-    # ================= ARTIFACTS =================
-    - name: Upload CPU artefacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: LumiRender-CPU
-        path: LumiRender-CPU.zip
-
-    - name: Upload GPU artefacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: LumiRender-GPU
-        path: LumiRender-GPU.zip
-
-    - name: Upload rendertest
-      uses: actions/upload-artifact@v4
-      with:
-        name: rendertest
-        path: rendertest.zipendertest.zip -Force
 
     # ================= ARTIFACTS =================
     - name: Upload CPU artefacts
